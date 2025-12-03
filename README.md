@@ -50,3 +50,42 @@ Naming of the metrics and tools for the metrics:
 ├── tools   # main.py, and various plug-ins for different metrics
 └── trace_collection # place to store temparary traces locally, which are downloaded from Google Drive.
 ```
+
+## Running Experiment
+
+### Setup:
+
+Create a conda env:
+
+```bash
+conda create --name projectenv python=3.10
+conda activate projectenv
+```
+
+Install requirements:
+
+```bash
+pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu126 --force-reinstall
+pip install -r requirements.txt
+```
+
+Install torchtitan:
+
+```bash
+git clone https://github.com/pytorch/torchtitan
+cd torchtitan
+pip install -r requirements.txt
+pip install -e .
+```
+
+
+
+Allocate GPUs using `salloc --nodes 1 --qos interactive --time {time} --constraint gpu --gpus 4 --account {account}`
+
+Activate conda env. Then run experiment using these commands
+```bash
+cd trace_gen
+CONFIG_FILE="../train_configs/llama3_8b.toml" ./run_experiment.sh
+```
+
+The .toml file in train_configs works for running a primary experiment. There should still be a script created to map from .yaml to .toml for the experiments.
