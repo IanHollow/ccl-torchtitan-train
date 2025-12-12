@@ -56,6 +56,11 @@ _METRIC_MODULES: dict[str, str] = {
     "straggler_lag": "straggler_lag.straggler_lag",
     "throughput_tokens": "throughput_tokens.throughput_tokens",
     "traffic_distribution": "traffic_distribution.traffic_distribution",
+    "hardware_saturation": "hardware_saturation.hardware_saturation",
+    "comm_volume": "comm_volume.comm_volume",
+    "variability_metrics": "variability_metrics.variability_metrics",
+    "config_metadata": "config_metadata.config_metadata",
+    "training_quality": "training_quality.training_quality",
 }
 
 # Sorted list for CLI display

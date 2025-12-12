@@ -1,21 +1,19 @@
 # =============================================================================
-# LLaMA-3.1-8B Pure Tensor Parallelism (TP=4)
+# LLaMA-3.1-8B Hybrid FSDP + TP (dp_shard=2, tp=2)
 # =============================================================================
-# CS5470 CCL-Bench Configuration
-#
 # world_size = 4 (nnodes=1, nproc_per_node=4)
-# Parallelism: dp_replicate=1, dp_shard=1, tp=4, pp=1, cp=1
-# Verification: 1 × 1 × 4 × 1 × 1 = 4 ✓
+# Parallelism: dp_replicate=1, dp_shard=2, tp=2, pp=1, cp=1
+# Verification: 1 × 2 × 2 × 1 × 1 = 4 ✓
 #
-# Launch command:
+# Launch:
 #   torchrun --nnodes=1 --nproc_per_node=4 \
-#     -m torchtitan.train --job.config_file train_configs/llama3_8b_tp.toml
+#     -m torchtitan.train --job.config_file train_configs/llama3_8b_fsdp_tp.toml
 # =============================================================================
 
 [job]
-dump_folder = "/pscratch/sd/g/gb555/ccl-bench-traces/llama3_8b_tp"
+dump_folder = "/pscratch/sd/g/gb555/ccl-bench-traces/llama3_8b_fsdp_tp"
 print_config = true
-description = "CS5470 CCL-Bench run: llama3_8b_tp"
+description = "CS5470 CCL-Bench run: llama3_8b_fsdp_tp (FSDP+TP 2x2)"
 
 [profiling]
 enable_profiling = true
@@ -51,7 +49,7 @@ min_lr_factor = 0.0
 [training]
 steps = 100
 local_batch_size = 1
-global_batch_size = 1
+global_batch_size = 2          # must be multiple of local_batch_size * dp_degree (1 * 2)
 seq_len = 4096
 max_norm = 1.0
 dataset = "c4"
@@ -62,8 +60,8 @@ gc_freq = 50
 
 [parallelism]
 data_parallel_replicate_degree = 1
-data_parallel_shard_degree = 1
-tensor_parallel_degree = 4
+data_parallel_shard_degree = 2   # FSDP: 2-way shard
+tensor_parallel_degree = 2       # TP: 2-way
 pipeline_parallel_degree = 1
 pipeline_parallel_microbatch_size = 1
 pipeline_parallel_schedule = "1F1B"

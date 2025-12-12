@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CCL-Bench Analysis Report - llama3_8b_fsdp</title>
+    <style>
+        :root {
+            --primary: #2E86AB;
+            --secondary: #A23B72;
+            --success: #3A7D44;
+            --warning: #F18F01;
+            --danger: #C73E1D;
+            --dark: #1a1a2e;
+            --light: #f8f9fa;
+            --gray: #6c757d;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            min-height: 100vh;
+            color: var(--dark);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--dark) 0%, #16213e 100%);
+            color: white;
+            padding: 3rem 2rem;
+            margin-bottom: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 700;
+        }
+
+        header .subtitle {
+            opacity: 0.8;
+            font-size: 1.1rem;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            text-align: center;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .stat-card .label {
+            color: var(--gray);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .stat-card.success .value { color: var(--success); }
+        .stat-card.warning .value { color: var(--warning); }
+        .stat-card.danger .value { color: var(--danger); }
+
+        section {
+            background: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+
+        section h2 {
+            color: var(--dark);
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 3px solid var(--primary);
+            font-size: 1.5rem;
+        }
+
+        .plot-container {
+            text-align: center;
+            margin: 1rem 0;
+        }
+
+        .plot-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .plot-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 2rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        th {
+            background: var(--light);
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--gray);
+            font-size: 0.9rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge-success { background: #d4edda; color: #155724; }
+        .badge-warning { background: #fff3cd; color: #856404; }
+        .badge-danger { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 CCL-Bench Analysis Report</h1>
+            <p class="subtitle">Workload: llama3_8b_fsdp | Iterations Analyzed: 4</p>
+        </header>
+
+        <section>
+            <h2>⚙️ Configuration & Hardware</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    <tr>
+                        <td rowspan="6"><strong>Parallelism</strong></td>
+                        <td>World Size</td>
+                        <td>4</td>
+                    </tr>
+                    <tr><td>TP (Tensor Parallel)</td><td>1</td></tr>
+                    <tr><td>DP (Data Parallel)</td><td>4</td></tr>
+                    <tr><td>PP (Pipeline Parallel)</td><td>1</td></tr>
+                    <tr><td>CP (Context Parallel)</td><td>1</td></tr>
+                    <tr><td>EP (Expert Parallel)</td><td>1</td></tr>
+
+                    <tr>
+                        <td rowspan="4"><strong>Data</strong></td>
+                        <td>Sequence Length</td>
+                        <td>4096</td>
+                    </tr>
+                    <tr><td>Global Batch Size</td><td>4</td></tr>
+                    <tr><td>Local Batch Size</td><td>1</td></tr>
+                    <tr><td>Micro Batch Size</td><td>0</td></tr>
+
+                    <tr>
+                        <td rowspan="3"><strong>Hardware</strong></td>
+                        <td>GPU Model</td>
+                        <td>unknown</td>
+                    </tr>
+                    <tr><td>Number of GPUs</td><td>4</td></tr>
+                    <tr><td>Interconnect</td><td>unknown</td></tr>
+
+                    <tr>
+                        <td rowspan="2"><strong>Model</strong></td>
+                        <td>Name</td>
+                        <td>llama38B</td>
+                    </tr>
+                    <tr><td>Parameters</td><td>8,000,000,000.0</td></tr>
+
+                </tbody>
+            </table>
+        </section>
+
+        <div class="summary-grid">
+            <div class="stat-card success">
+                <div class="value">19.9K</div>
+                <div class="label">Avg Throughput (tokens/sec)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">1420.2</div>
+                <div class="label">Avg Iteration Time (ms)</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="value">5.9%</div>
+                <div class="label">Avg Pipeline Bubble</div>
+            </div>
+            <div class="stat-card danger">
+                <div class="value">32.4%</div>
+                <div class="label">Avg Comm/Comp Overlap</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">80</div>
+                <div class="label">Total Collective Calls</div>
+            </div>
+        </div>
+
+        <section>
+            <h2>📈 Performance Dashboard</h2>
+            <div class="plot-container">
+                <img src="summary_dashboard.png" alt="Summary Dashboard">
+            </div>
+        </section>
+
+        <section>
+            <h2>📊 Detailed Metrics</h2>
+            <div class="plot-grid">
+
+                <div class="plot-container">
+                    <h3>🚀 Throughput Analysis</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Training throughput measured in tokens per second.</p>
+                    <img src="throughput.png" alt="🚀 Throughput Analysis">
+                </div>
+
+                <div class="plot-container">
+                    <h3>⏱️ Iteration Time</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Wall-clock time for each training iteration.</p>
+                    <img src="iter_time.png" alt="⏱️ Iteration Time">
+                </div>
+
+                <div class="plot-container">
+                    <h3>🔄 Communication/Computation Overlap</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">How well communication is hidden behind computation.</p>
+                    <img src="comm_comp_overlap.png" alt="🔄 Communication/Computation Overlap">
+                </div>
+
+                <div class="plot-container">
+                    <h3>🫧 Pipeline Bubble Analysis</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Idle time in pipeline parallel execution.</p>
+                    <img src="pipeline_bubble.png" alt="🫧 Pipeline Bubble Analysis">
+                </div>
+
+                <div class="plot-container">
+                    <h3>🐢 Straggler Lag</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Synchronization overhead between ranks.</p>
+                    <img src="straggler_lag.png" alt="🐢 Straggler Lag">
+                </div>
+
+                <div class="plot-container">
+                    <h3>📡 Traffic Distribution</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Communication traffic breakdown by parallelism type.</p>
+                    <img src="traffic_distribution.png" alt="📡 Traffic Distribution">
+                </div>
+
+                <div class="plot-container">
+                    <h3>📞 Collective Calls</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Number and types of collective communication operations.</p>
+                    <img src="coll_calls.png" alt="📞 Collective Calls">
+                </div>
+
+                <div class="plot-container">
+                    <h3>💻 Hardware Saturation</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">GPU utilization (MFU/TFLOPs) and memory usage.</p>
+                    <img src="hardware_saturation.png" alt="💻 Hardware Saturation">
+                </div>
+
+                <div class="plot-container">
+                    <h3>📊 Communication Volume</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Total bytes sent/received, broken down by parallelism type.</p>
+                    <img src="comm_volume.png" alt="📊 Communication Volume">
+                </div>
+
+                <div class="plot-container">
+                    <h3>📈 Variability Metrics</h3>
+                    <p style="color: var(--gray); font-size: 0.9rem; margin-bottom: 1rem;">Stability and dispersion statistics across iterations.</p>
+                    <img src="variability.png" alt="📈 Variability Metrics">
+                </div>
+
+            </div>
+        </section>
+
+        <section>
+            <h2>📋 Raw Data by Iteration</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Iteration</th>
+                        <th>Throughput (K tok/s)</th>
+                        <th>Iter Time (ms)</th>
+                        <th>Bubble Ratio</th>
+                        <th>Overlap Ratio</th>
+                        <th>Comm Calls</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                    <tr>
+                        <td><strong>5</strong></td>
+                        <td>19.8K</td>
+                        <td>1250.1</td>
+                        <td><span class="badge badge-warning">6.7%</span></td>
+                        <td><span class="badge badge-danger">32.8%</span></td>
+                        <td>8</td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>10</strong></td>
+                        <td>20.0K</td>
+                        <td>1590.1</td>
+                        <td><span class="badge badge-warning">5.2%</span></td>
+                        <td><span class="badge badge-danger">32.1%</span></td>
+                        <td>32</td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>15</strong></td>
+                        <td>20.0K</td>
+                        <td>1253.1</td>
+                        <td><span class="badge badge-warning">6.4%</span></td>
+                        <td><span class="badge badge-danger">32.7%</span></td>
+                        <td>8</td>
+                    </tr>
+
+                    <tr>
+                        <td><strong>20</strong></td>
+                        <td>19.9K</td>
+                        <td>1587.6</td>
+                        <td><span class="badge badge-warning">5.2%</span></td>
+                        <td><span class="badge badge-danger">31.9%</span></td>
+                        <td>32</td>
+                    </tr>
+
+                </tbody>
+            </table>
+        </section>
+
+        <footer>
+            <p>Generated by CCL-Bench Analysis Tool | torch_traces</p>
+        </footer>
+    </div>
+</body>
+</html>

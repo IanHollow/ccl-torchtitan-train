@@ -1,15 +1,10 @@
 """Communication/Computation Overlap metric calculation.
 
-Measures the overlap ratio between communication (NCCL) and computation (CUDA kernels)
+Measures the overlap ratio between communication (NCCL/collective ops) and computation (CUDA kernels)
 on the GPU timeline.
 
 NVTX Dependency: None
 This metric works purely from kernel events and doesn't require NVTX instrumentation.
-
-Classification:
-- Communication: Kernels with names containing 'nccl'
-- Computation: GPU kernels like matmul, attention, gemm, cutlass, sgemm, mma, etc.
-- Ignored: memcpy, memset (trivial kernels)
 """
 
 from __future__ import annotations
@@ -21,9 +16,31 @@ from typing import Any
 
 
 # NCCL kernel patterns (communication)
+# Expanded to include ATen/c10d wrappers often used by FSDP/DDP
 _COMM_KERNEL_PATTERNS = (
+    # NCCL kernel prefixes
     "nccl",
     "c10d::",
+    # Explicit NCCL kernel names (for kernel-level events)
+    "ncclDevKernel_",
+    "ncclKernel_",
+    # --- Expanded Collective operation names (FSDP/DDP) ---
+    "allgather",
+    "all_gather",
+    "aten::all_gather",  # <-- Added
+    "reduce_scatter",
+    "reducescatter",
+    "aten::reduce_scatter",  # <-- Added
+    "all_reduce",
+    "allreduce",
+    "aten::all_reduce",  # <-- Added
+    # --- Standard Collectives ---
+    "broadcast",
+    "reduce",
+    "all_to_all",
+    "alltoall",
+    "sendrecv",
+    "send_recv",
 )
 
 # Compute kernel patterns (includes common GPU compute kernels)
@@ -71,7 +88,7 @@ def metric_cal(directory: str, profile_mode: str = "auto") -> dict[str, Any]:
             - comp_time_ms: Total computation time in milliseconds
             - overlap_time_ms: Time where comm and comp overlap
             - overlap_ratio_of_comm: Fraction of comm time that overlaps with comp
-            - overlap_ratio_of_comp: Fraction of comp time that overlaps with comm
+            - overlap_ratio_of_comp: Fraction of comp time that overlaps with comp
             - num_comm_kernels: Number of communication kernels
             - num_comp_kernels: Number of computation kernels
     """
@@ -113,10 +130,25 @@ def metric_cal(directory: str, profile_mode: str = "auto") -> dict[str, Any]:
     }
 
 
-def _is_comm_kernel(name: str) -> bool:
-    """Check if a kernel name indicates a communication kernel."""
+def _is_comm_kernel(name: str, cat: str = "") -> bool:
+    """Check if a kernel name indicates a communication kernel.
+    
+    Args:
+        name: Event/kernel name
+        cat: Event category (optional, for additional classification)
+    """
     name_lower = name.lower()
-    return any(p in name_lower for p in _COMM_KERNEL_PATTERNS)
+    cat_lower = cat.lower()
+    
+    # 1. Check name patterns (now includes aten wrappers)
+    if any(p in name_lower for p in _COMM_KERNEL_PATTERNS):
+        return True
+    
+    # 2. Check category for communication-related categories
+    if any(comm_cat in cat_lower for comm_cat in ("nccl", "c10d", "communication", "comm")):
+        return True
+    
+    return False
 
 
 def _is_compute_kernel(name: str, cat: str) -> bool:
@@ -129,8 +161,8 @@ def _is_compute_kernel(name: str, cat: str) -> bool:
 
     # GPU kernel category
     if cat == "kernel":
-        # If it's a kernel but not NCCL, it's likely compute
-        if not _is_comm_kernel(name):
+        # If it's a kernel but not communication, it's likely compute
+        if not _is_comm_kernel(name, cat):
             return True
 
     # Check for known compute patterns
@@ -164,7 +196,7 @@ def _calculate_overlap_from_trace(trace_path: Path) -> dict[str, Any] | None:
                 continue
 
             # Classify kernel
-            if _is_comm_kernel(name):
+            if _is_comm_kernel(name, cat):
                 comm_intervals.append((ts, ts + dur))
             elif _is_compute_kernel(name, cat):
                 comp_intervals.append((ts, ts + dur))

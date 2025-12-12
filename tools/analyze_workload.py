@@ -38,6 +38,11 @@ from comm_comp_overlap.comm_comp_overlap import metric_cal as calc_comm_comp_ove
 from pipeline_bubble.pipeline_bubble import metric_cal as calc_pipeline_bubble
 from straggler_lag.straggler_lag import metric_cal as calc_straggler_lag
 from traffic_distribution.traffic_distribution import metric_cal as calc_traffic_distribution
+from hardware_saturation.hardware_saturation import metric_cal as calc_hardware_saturation
+from comm_volume.comm_volume import metric_cal as calc_comm_volume
+from variability_metrics.variability_metrics import metric_cal as calc_variability_metrics
+from config_metadata.config_metadata import metric_cal as calc_config_metadata
+from training_quality.training_quality import metric_cal as calc_training_quality
 
 # Try to import plotting libraries
 try:
@@ -67,6 +72,11 @@ METRICS = {
     "pipeline_bubble": calc_pipeline_bubble,
     "straggler_lag": calc_straggler_lag,
     "traffic_distribution": calc_traffic_distribution,
+    "hardware_saturation": calc_hardware_saturation,
+    "comm_volume": calc_comm_volume,
+    "variability_metrics": calc_variability_metrics,
+    "config_metadata": calc_config_metadata,
+    "training_quality": calc_training_quality,
 }
 
 
@@ -117,7 +127,7 @@ def find_iterations(trace_base: str) -> list[tuple[int, str]]:
     return sorted(iterations, key=lambda x: x[0])
 
 
-def collect_metrics(trace_dir: str, metrics_to_run: list[str] | None = None) -> dict[str, Any]:
+def collect_metrics(trace_dir: str, metrics_to_run: list[str] | None = None, workload_card_path: str | None = None) -> dict[str, Any]:
     """Collect all metrics for a trace directory."""
     results = {}
 
@@ -129,7 +139,14 @@ def collect_metrics(trace_dir: str, metrics_to_run: list[str] | None = None) -> 
             continue
 
         try:
-            result = METRICS[metric_name](trace_dir)
+            # Pass workload_card_path to metrics that support it
+            metric_func = METRICS[metric_name]
+            import inspect
+            sig = inspect.signature(metric_func)
+            if "workload_card_path" in sig.parameters:
+                result = metric_func(trace_dir, workload_card_path=workload_card_path)
+            else:
+                result = metric_func(trace_dir)
             results[metric_name] = result
         except Exception as e:
             print(f"  Error computing {metric_name}: {e}", file=sys.stderr)
@@ -142,6 +159,7 @@ def analyze_workload(
     trace_base: str,
     workload_name: str | None = None,
     metrics_to_run: list[str] | None = None,
+    workload_card_path: str | None = None,
 ) -> WorkloadAnalysis:
     """Analyze a complete workload across all iterations."""
 
@@ -171,7 +189,7 @@ def analyze_workload(
             trace_dir=iter_dir,
         )
 
-        iter_data.metrics = collect_metrics(iter_dir, metrics_to_run)
+        iter_data.metrics = collect_metrics(iter_dir, metrics_to_run, workload_card_path)
         analysis.iterations.append(iter_data)
 
     return analysis
@@ -215,6 +233,7 @@ def get_color_palette():
         'tertiary': '#F18F01',     # Orange
         'quaternary': '#C73E1D',   # Red
         'success': '#3A7D44',      # Green
+        'warning': '#F18F01',      # Orange (same as tertiary, for warnings)
         'neutral': '#6C757D',      # Gray
         'pp': '#2E86AB',           # Pipeline Parallel - Blue
         'tp': '#A23B72',           # Tensor Parallel - Magenta
@@ -805,6 +824,346 @@ def plot_summary_dashboard(analysis: WorkloadAnalysis, output_dir: Path) -> str 
     return str(filename)
 
 
+def plot_hardware_saturation(analysis: WorkloadAnalysis, output_dir: Path) -> str | None:
+    """Plot hardware saturation metrics (MFU, TFLOPs, GPU memory)."""
+    if not HAS_MATPLOTLIB:
+        return None
+    
+    # Collect data from first iteration (hardware metrics are typically constant)
+    if not analysis.iterations:
+        return None
+    
+    first_iter = analysis.iterations[0]
+    if "hardware_saturation" not in first_iter.metrics:
+        return None
+    
+    data = first_iter.metrics["hardware_saturation"]
+    if "error" in data:
+        return None
+    
+    colors = get_color_palette()
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # Plot 1: MFU
+    mfu = data.get("mfu_percent", 0)
+    note = data.get("note", "")
+    if mfu > 0:
+        ax1.barh([0], [mfu], color=colors['success'] if mfu > 50 else colors['warning'], alpha=0.8)
+        ax1.set_xlabel('MFU (%)')
+        ax1.set_title(f'Model FLOP Utilization: {mfu:.1f}%', fontweight='bold')
+        ax1.set_xlim(0, 100)
+        ax1.set_yticks([])
+        ax1.axvline(x=50, color=colors['quaternary'], linestyle='--', alpha=0.7, label='Target >50%')
+        ax1.legend()
+    else:
+        ax1.text(0.5, 0.5, f'MFU: Not Available\n{note if note else "Check workload card and iteration time"}', 
+                ha='center', va='center', transform=ax1.transAxes, fontsize=11)
+        ax1.set_title('Model FLOP Utilization', fontweight='bold')
+        ax1.set_xlim(0, 1)
+        ax1.set_ylim(0, 1)
+        ax1.axis('off')
+    
+    # Plot 2: TFLOPs per GPU
+    tflops = data.get("tflops_per_gpu", 0)
+    if tflops > 0:
+        peak_tflops = data.get("peak_tflops_per_gpu", 312.0)
+        ax2.barh([0], [tflops], color=colors['primary'], alpha=0.8)
+        ax2.axvline(x=peak_tflops, color=colors['quaternary'], linestyle='--', alpha=0.7, label=f'Peak: {peak_tflops:.0f} TFLOPs')
+        ax2.set_xlabel('TFLOPs per GPU')
+        ax2.set_title(f'TFLOPs per GPU: {tflops:.1f}', fontweight='bold')
+        ax2.set_yticks([])
+        ax2.legend()
+    else:
+        ax2.text(0.5, 0.5, f'TFLOPs: Not Available\n{note if note else "Check workload card and iteration time"}', 
+                ha='center', va='center', transform=ax2.transAxes, fontsize=11)
+        ax2.set_title('TFLOPs per GPU', fontweight='bold')
+        ax2.set_xlim(0, 1)
+        ax2.set_ylim(0, 1)
+        ax2.axis('off')
+    
+    # Plot 3: Peak memory per rank
+    memory_by_rank = data.get("memory_by_rank", [])
+    if memory_by_rank:
+        ranks = [r for r, _ in memory_by_rank]
+        mems = [m for _, m in memory_by_rank]
+        ax3.bar(ranks, mems, color=colors['secondary'], alpha=0.8)
+        ax3.set_xlabel('Rank')
+        ax3.set_ylabel('Peak Memory (GB)')
+        ax3.set_title('Peak GPU Memory per Rank', fontweight='bold')
+        ax3.xaxis.set_major_locator(MaxNLocator(integer=True))
+    else:
+        ax3.text(0.5, 0.5, 'Memory Data: Not Available\nCheck trace files for memory events', 
+                ha='center', va='center', transform=ax3.transAxes, fontsize=11)
+        ax3.set_title('Peak GPU Memory per Rank', fontweight='bold')
+        ax3.set_xlim(0, 1)
+        ax3.set_ylim(0, 1)
+        ax3.axis('off')
+    
+    # Plot 4: Memory summary text or info
+    if memory_by_rank:
+        mem_str = ", ".join([f"{m:.1f} GB (rank {r})" for r, m in memory_by_rank[:5]])
+        if len(memory_by_rank) > 5:
+            mem_str += f", ... ({len(memory_by_rank)} ranks total)"
+        ax4.text(0.1, 0.5, f'Peak HBM Memory:\n{mem_str}', 
+                fontsize=12, verticalalignment='center', transform=ax4.transAxes)
+        ax4.axis('off')
+    else:
+        # Show GPU info if available
+        gpu_model = data.get("gpu_model", "unknown")
+        num_gpus = data.get("num_gpus", 0)
+        info_text = f"GPU Model: {gpu_model}\n"
+        if num_gpus > 0:
+            info_text += f"Number of GPUs: {num_gpus}\n"
+        info_text += "\nMemory data not found in traces."
+        ax4.text(0.1, 0.5, info_text, fontsize=11, verticalalignment='center', 
+                transform=ax4.transAxes, family='monospace')
+        ax4.axis('off')
+    
+    fig.suptitle(f'Hardware Saturation - {analysis.workload_name}',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    filename = output_dir / 'hardware_saturation.png'
+    plt.savefig(filename)
+    plt.close()
+    
+    return str(filename)
+
+
+def plot_comm_volume(analysis: WorkloadAnalysis, output_dir: Path) -> str | None:
+    """Plot communication volume breakdown."""
+    if not HAS_MATPLOTLIB:
+        return None
+    
+    # Aggregate across iterations
+    total_bytes = 0
+    tp_bytes = 0
+    dp_bytes = 0
+    pp_bytes = 0
+    ep_bytes = 0
+    gb_per_step = 0
+    
+    for iter_data in analysis.iterations:
+        if "comm_volume" not in iter_data.metrics:
+            continue
+        data = iter_data.metrics["comm_volume"]
+        if "error" in data:
+            continue
+        
+        total_bytes += data.get("total_bytes", 0)
+        tp_bytes += data.get("tp_bytes", 0)
+        dp_bytes += data.get("dp_bytes", 0)
+        pp_bytes += data.get("pp_bytes", 0)
+        ep_bytes += data.get("ep_bytes", 0)
+        gb_per_step = data.get("gb_per_step", 0)  # Use last value
+    
+    if total_bytes == 0:
+        return None
+    
+    colors = get_color_palette()
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # Left: Stacked bar by type
+    types = ['TP', 'DP', 'PP', 'EP']
+    values = [
+        tp_bytes / (1024**3),
+        dp_bytes / (1024**3),
+        pp_bytes / (1024**3),
+        ep_bytes / (1024**3),
+    ]
+    type_colors = [colors['tp'], colors['dp'], colors['pp'], colors['ep']]
+    
+    bars = ax1.bar(types, values, color=type_colors, alpha=0.8)
+    ax1.set_ylabel('Total Volume (GB)')
+    ax1.set_title('Communication Volume by Type')
+    
+    for bar, val in zip(bars, values):
+        if val > 0:
+            ax1.annotate(f'{val:.2f} GB', xy=(bar.get_x() + bar.get_width()/2, bar.get_height()),
+                        ha='center', va='bottom', fontsize=9, fontweight='bold')
+    
+    # Right: GB per step
+    if gb_per_step > 0:
+        ax2.barh([0], [gb_per_step], color=colors['primary'], alpha=0.8)
+        ax2.set_xlabel('GB per Step')
+        ax2.set_title(f'Communication Volume: {gb_per_step:.3f} GB/step', fontweight='bold')
+        ax2.set_yticks([])
+    
+    fig.suptitle(f'Communication Volume Analysis - {analysis.workload_name}',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    filename = output_dir / 'comm_volume.png'
+    plt.savefig(filename)
+    plt.close()
+    
+    return str(filename)
+
+
+def plot_variability(analysis: WorkloadAnalysis, output_dir: Path) -> str | None:
+    """Plot variability metrics."""
+    if not HAS_MATPLOTLIB:
+        return None
+    
+    # Collect from first iteration (variability is computed across all iterations)
+    if not analysis.iterations:
+        return None
+    
+    first_iter = analysis.iterations[0]
+    if "variability_metrics" not in first_iter.metrics:
+        return None
+    
+    data = first_iter.metrics["variability_metrics"]
+    if "error" in data:
+        return None
+    
+    colors = get_color_palette()
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+    
+    # Plot 1: Throughput dispersion
+    throughput_disp = data.get("throughput_dispersion", {})
+    if throughput_disp.get("mean", 0) > 0:
+        stats = ['Mean', 'P5', 'P50', 'P95']
+        values = [
+            throughput_disp.get("mean", 0) / 1000,  # Convert to K tokens/s
+            throughput_disp.get("p5", 0) / 1000,
+            throughput_disp.get("p50", 0) / 1000,
+            throughput_disp.get("p95", 0) / 1000,
+        ]
+        ax1.bar(stats, values, color=colors['success'], alpha=0.8)
+        ax1.set_ylabel('Throughput (K tokens/s)')
+        ax1.set_title('Throughput Dispersion', fontweight='bold')
+        ax1.axhline(y=values[0], color=colors['quaternary'], linestyle='--', alpha=0.7)
+    
+    # Plot 2: Iter time dispersion
+    iter_disp = data.get("iter_time_dispersion", {})
+    if iter_disp.get("mean", 0) > 0:
+        stats = ['Mean', 'P5', 'P50', 'P95']
+        values = [
+            iter_disp.get("mean", 0),
+            iter_disp.get("p5", 0),
+            iter_disp.get("p50", 0),
+            iter_disp.get("p95", 0),
+        ]
+        ax2.bar(stats, values, color=colors['primary'], alpha=0.8)
+        ax2.set_ylabel('Iteration Time (ms)')
+        ax2.set_title('Iteration Time Dispersion', fontweight='bold')
+        ax2.axhline(y=values[0], color=colors['quaternary'], linestyle='--', alpha=0.7)
+    
+    # Plot 3: Straggler score
+    straggler = data.get("straggler_score", {})
+    if straggler.get("mean_lag_ms", 0) > 0:
+        mean_lag = straggler.get("mean_lag_ms", 0)
+        max_lag = straggler.get("max_lag_ms", 0)
+        cv = straggler.get("cv", 0)
+        
+        ax3.bar(['Mean Lag', 'Max Lag'], [mean_lag, max_lag], color=colors['tertiary'], alpha=0.8)
+        ax3.set_ylabel('Lag (ms)')
+        ax3.set_title('Straggler Lag', fontweight='bold')
+        
+        # Add CV as text
+        ax3.text(0.5, 0.95, f'CV: {cv:.3f}', transform=ax3.transAxes,
+                ha='center', va='top', fontsize=10, fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    # Plot 4: Summary stats table
+    summary_text = []
+    if throughput_disp.get("std", 0) > 0:
+        summary_text.append(f"Throughput: {throughput_disp['mean']/1000:.1f}K ± {throughput_disp['std']/1000:.1f}K tok/s")
+    if iter_disp.get("std", 0) > 0:
+        summary_text.append(f"Iter Time: {iter_disp['mean']:.1f} ± {iter_disp['std']:.1f} ms")
+    if straggler.get("cv", 0) > 0:
+        summary_text.append(f"Straggler CV: {straggler['cv']:.3f}")
+    
+    if summary_text:
+        ax4.text(0.1, 0.5, '\n'.join(summary_text), fontsize=11,
+                verticalalignment='center', transform=ax4.transAxes)
+    ax4.axis('off')
+    
+    fig.suptitle(f'Variability Analysis - {analysis.workload_name}',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    filename = output_dir / 'variability.png'
+    plt.savefig(filename)
+    plt.close()
+    
+    return str(filename)
+
+
+def plot_training_quality(analysis: WorkloadAnalysis, output_dir: Path) -> str | None:
+    """Plot training quality metrics (loss, grad norm, lr)."""
+    if not HAS_MATPLOTLIB:
+        return None
+    
+    # Collect from first iteration
+    if not analysis.iterations:
+        return None
+    
+    first_iter = analysis.iterations[0]
+    if "training_quality" not in first_iter.metrics:
+        return None
+    
+    data = first_iter.metrics["training_quality"]
+    if "error" in data:
+        return None
+    
+    loss_data = data.get("loss_by_step", [])
+    grad_norm_data = data.get("gradient_norm_by_step", [])
+    lr_data = data.get("lr_by_step", [])
+    
+    if not loss_data and not grad_norm_data and not lr_data:
+        return None
+    
+    colors = get_color_palette()
+    num_plots = sum([bool(loss_data), bool(grad_norm_data), bool(lr_data)])
+    
+    if num_plots == 0:
+        return None
+    
+    fig, axes = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots))
+    if num_plots == 1:
+        axes = [axes]
+    
+    idx = 0
+    
+    # Plot loss
+    if loss_data:
+        steps, losses = zip(*loss_data)
+        axes[idx].plot(steps, losses, color=colors['quaternary'], linewidth=2, marker='o', markersize=3)
+        axes[idx].set_xlabel('Step')
+        axes[idx].set_ylabel('Loss')
+        axes[idx].set_title('Training Loss', fontweight='bold')
+        axes[idx].grid(True, alpha=0.3)
+        idx += 1
+    
+    # Plot gradient norm
+    if grad_norm_data:
+        steps, norms = zip(*grad_norm_data)
+        axes[idx].plot(steps, norms, color=colors['warning'], linewidth=2, marker='o', markersize=3)
+        axes[idx].set_xlabel('Step')
+        axes[idx].set_ylabel('Gradient Norm')
+        axes[idx].set_title('Gradient Norm', fontweight='bold')
+        axes[idx].grid(True, alpha=0.3)
+        idx += 1
+    
+    # Plot learning rate
+    if lr_data:
+        steps, lrs = zip(*lr_data)
+        axes[idx].plot(steps, lrs, color=colors['success'], linewidth=2, marker='o', markersize=3)
+        axes[idx].set_xlabel('Step')
+        axes[idx].set_ylabel('Learning Rate')
+        axes[idx].set_title('Learning Rate Schedule', fontweight='bold')
+        axes[idx].grid(True, alpha=0.3)
+        axes[idx].set_yscale('log')
+    
+    fig.suptitle(f'Training Quality Metrics - {analysis.workload_name}',
+                 fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    filename = output_dir / 'training_quality.png'
+    plt.savefig(filename)
+    plt.close()
+    
+    return str(filename)
+
+
 # =============================================================================
 # Export Functions
 # =============================================================================
@@ -1066,7 +1425,99 @@ def generate_html_report(
             <h1>📊 CCL-Bench Analysis Report</h1>
             <p class="subtitle">Workload: {analysis.workload_name} | Iterations Analyzed: {len(analysis.iterations)}</p>
         </header>
-
+"""
+    
+    # Add config metadata section if available
+    if analysis.iterations:
+        first_iter = analysis.iterations[0]
+        if "config_metadata" in first_iter.metrics:
+            config = first_iter.metrics["config_metadata"]
+            if "error" not in config:
+                parallel = config.get("parallelism", {})
+                data = config.get("data", {})
+                hardware = config.get("hardware", {})
+                model = config.get("model", {})
+                
+                html_content += """
+        <section>
+            <h2>⚙️ Configuration & Hardware</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Parameter</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+"""
+                # Parallelism - show if any parallelism values exist
+                has_parallelism = any([
+                    parallel.get("world_size"),
+                    parallel.get("tp"),
+                    parallel.get("dp"),
+                    parallel.get("pp"),
+                    parallel.get("cp"),
+                    parallel.get("ep"),
+                ])
+                
+                if has_parallelism:
+                    html_content += f"""
+                    <tr>
+                        <td rowspan="6"><strong>Parallelism</strong></td>
+                        <td>World Size</td>
+                        <td>{parallel.get("world_size") if parallel.get("world_size") else "N/A"}</td>
+                    </tr>
+                    <tr><td>TP (Tensor Parallel)</td><td>{parallel.get("tp") if parallel.get("tp") is not None else "N/A"}</td></tr>
+                    <tr><td>DP (Data Parallel)</td><td>{parallel.get("dp") if parallel.get("dp") is not None else "N/A"}</td></tr>
+                    <tr><td>PP (Pipeline Parallel)</td><td>{parallel.get("pp") if parallel.get("pp") is not None else "N/A"}</td></tr>
+                    <tr><td>CP (Context Parallel)</td><td>{parallel.get("cp") if parallel.get("cp") is not None else "N/A"}</td></tr>
+                    <tr><td>EP (Expert Parallel)</td><td>{parallel.get("ep") if parallel.get("ep") is not None else "N/A"}</td></tr>
+"""
+                
+                # Data config
+                if data.get("seq_len"):
+                    html_content += f"""
+                    <tr>
+                        <td rowspan="4"><strong>Data</strong></td>
+                        <td>Sequence Length</td>
+                        <td>{data.get("seq_len", "N/A")}</td>
+                    </tr>
+                    <tr><td>Global Batch Size</td><td>{data.get("global_batch_size", data.get("batch_size", "N/A"))}</td></tr>
+                    <tr><td>Local Batch Size</td><td>{data.get("local_batch_size", data.get("batch_size", "N/A"))}</td></tr>
+                    <tr><td>Micro Batch Size</td><td>{data.get("micro_batch_size", "N/A")}</td></tr>
+"""
+                
+                # Hardware
+                if hardware.get("gpu_model"):
+                    html_content += f"""
+                    <tr>
+                        <td rowspan="3"><strong>Hardware</strong></td>
+                        <td>GPU Model</td>
+                        <td>{hardware.get("gpu_model", "N/A")}</td>
+                    </tr>
+                    <tr><td>Number of GPUs</td><td>{hardware.get("num_gpus", "N/A")}</td></tr>
+                    <tr><td>Interconnect</td><td>{hardware.get("interconnect", "N/A")}</td></tr>
+"""
+                
+                # Model
+                if model.get("name"):
+                    html_content += f"""
+                    <tr>
+                        <td rowspan="2"><strong>Model</strong></td>
+                        <td>Name</td>
+                        <td>{model.get("name", "N/A")}</td>
+                    </tr>
+                    <tr><td>Parameters</td><td>{f"{model.get('num_params', 0):,}" if isinstance(model.get("num_params"), (int, float)) else "N/A"}</td></tr>
+"""
+                
+                html_content += """
+                </tbody>
+            </table>
+        </section>
+"""
+    
+    html_content += f"""
         <div class="summary-grid">
             <div class="stat-card success">
                 <div class="value">{avg_throughput/1000:.1f}K</div>
@@ -1111,6 +1562,10 @@ def generate_html_report(
         ('straggler_lag', '🐢 Straggler Lag', 'Synchronization overhead between ranks.'),
         ('traffic_distribution', '📡 Traffic Distribution', 'Communication traffic breakdown by parallelism type.'),
         ('coll_calls', '📞 Collective Calls', 'Number and types of collective communication operations.'),
+        ('hardware_saturation', '💻 Hardware Saturation', 'GPU utilization (MFU/TFLOPs) and memory usage.'),
+        ('comm_volume', '📊 Communication Volume', 'Total bytes sent/received, broken down by parallelism type.'),
+        ('variability', '📈 Variability Metrics', 'Stability and dispersion statistics across iterations.'),
+        ('training_quality', '🎓 Training Quality', 'Training loss, gradient norm, and learning rate schedule.'),
     ]
 
     html_content += """
@@ -1231,6 +1686,12 @@ def main():
         action="store_true",
         help="Skip plot generation",
     )
+    parser.add_argument(
+        "--workload-card",
+        type=str,
+        default=None,
+        help="Path to workload card YAML or TOML config file (if not provided, will search automatically)",
+    )
 
     args = parser.parse_args()
 
@@ -1243,6 +1704,7 @@ def main():
         trace_base=args.trace_base,
         workload_name=args.name,
         metrics_to_run=args.metrics,
+        workload_card_path=args.workload_card,
     )
 
     if not analysis.iterations:
@@ -1275,6 +1737,10 @@ def main():
         plots['traffic_distribution'] = plot_traffic_distribution(analysis, output_dir)
         plots['coll_calls'] = plot_coll_call_breakdown(analysis, output_dir)
         plots['summary_dashboard'] = plot_summary_dashboard(analysis, output_dir)
+        plots['hardware_saturation'] = plot_hardware_saturation(analysis, output_dir)
+        plots['comm_volume'] = plot_comm_volume(analysis, output_dir)
+        plots['variability'] = plot_variability(analysis, output_dir)
+        plots['training_quality'] = plot_training_quality(analysis, output_dir)
 
         generated = [k for k, v in plots.items() if v]
         print(f"    Generated {len(generated)} plots: {', '.join(generated)}")
